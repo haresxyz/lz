@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { ethers } from "ethers";
 
 const MINIMAL_OFT_ABI = [
@@ -55,7 +55,7 @@ export default function App() {
   const [tokenMeta, setTokenMeta] = useState({ name: "", symbol: "", decimals: 18 });
 
   const [dst, setDst] = useState<number>(101);
-  const [recipient, setRecipient] = useState(""); // akan auto isi saat wallet connect
+  const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
 
   const [nativeFee, setNativeFee] = useState<string | null>(null);
@@ -74,7 +74,7 @@ export default function App() {
     setSigner(s);
     setAccount(addr);
 
-    // otomatis isi recipient dengan address wallet yang connect
+    // auto isi recipient dengan wallet yang connect
     setRecipient(addr);
   }
 
@@ -178,7 +178,7 @@ export default function App() {
             onChange={(e) => setRecipient(e.target.value)}
           />
           <p className="text-xs text-gray-500">
-            otomatis isi dengan wallet yang connect
+            otomatis terisi wallet yang connect
           </p>
         </div>
 
