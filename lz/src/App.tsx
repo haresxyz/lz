@@ -45,10 +45,15 @@ const LZ_CHAINS = [
   { label: "Base", eid: 112 },
 ];
 
+// 🔑 Chain asal kontrak kamu (ubah sesuai kebutuhan)
+// BSC Mainnet = 56, Ethereum = 1, Polygon = 137, dsb.
+const SOURCE_CHAIN_ID = 56;
+
 export default function App() {
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [account, setAccount] = useState<string | null>(null);
+  const [chainId, setChainId] = useState<number | null>(null);
 
   const [contractAddr, setContractAddr] = useState("");
   const [contract, setContract] = useState<OFT | null>(null);
@@ -61,7 +66,7 @@ export default function App() {
   const [nativeFee, setNativeFee] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // ✅ Connect Wallet dengan popup MetaMask
+  // ✅ Connect Wallet
   async function connectWallet() {
     try {
       if (!(window as any).ethereum) {
@@ -69,20 +74,18 @@ export default function App() {
         return;
       }
       const p = new ethers.BrowserProvider((window as any).ethereum, "any");
-
-      // Minta izin akun (pasti munculkan popup)
       const accounts = await p.send("eth_requestAccounts", []);
       const s = await p.getSigner();
       const addr = accounts[0];
+      const n = await p.getNetwork();
 
       setProvider(p);
       setSigner(s);
       setAccount(addr);
+      setChainId(Number(n.chainId));
 
-      // Auto isi recipient
+      // auto isi recipient
       setRecipient(addr);
-
-      console.log("Wallet connected:", addr);
     } catch (err: any) {
       console.error("Connect error:", err);
       alert("Gagal connect wallet: " + (err.message || err));
@@ -114,6 +117,10 @@ export default function App() {
   // Bridge
   async function doBridge() {
     if (!signer || !contract) return;
+    if (chainId !== SOURCE_CHAIN_ID) {
+      alert("Wallet belum di chain asal (BSC). Switch dulu di MetaMask.");
+      return;
+    }
     const cWrite = getOFT(contractAddr, signer);
     const from = await signer.getAddress();
     const amtWei = ethers.parseUnits(amount, tokenMeta.decimals);
@@ -149,7 +156,14 @@ export default function App() {
           </button>
         ) : (
           <div className="p-3 bg-green-50 rounded-lg text-sm text-green-700">
-            ✅ Connected: {account.slice(0, 6)}…{account.slice(-4)}
+            ✅ Connected: {account.slice(0, 6)}…{account.slice(-4)} | chainId:{" "}
+            {chainId}
+          </div>
+        )}
+
+        {chainId && chainId !== SOURCE_CHAIN_ID && (
+          <div className="p-3 bg-red-50 rounded-lg text-sm text-red-700">
+            ⚠️ Wallet kamu tidak di chain asal (BSC). Switch dulu di MetaMask.
           </div>
         )}
 
@@ -213,7 +227,7 @@ export default function App() {
           </button>
           <button
             onClick={doBridge}
-            disabled={busy}
+            disabled={busy || chainId !== SOURCE_CHAIN_ID}
             className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
           >
             {busy ? "Bridging..." : "Bridge"}
