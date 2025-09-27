@@ -1,80 +1,86 @@
 import { useState } from "react";
 import { ethers } from "ethers";
 
-/** ====== ABI minimal OFT LayerZero ====== */
+/** ===== ABI minimal OFT ===== */
 const MINIMAL_OFT_ABI = [
   "function estimateSendFee(uint16 _dstChainId, bytes _toAddress, uint _amount, bool _useZro, bytes _adapterParams) view returns (uint nativeFee, uint zroFee)",
   "function sendFrom(address _from, uint16 _dstChainId, bytes _toAddress, uint _amount, address payable _refundAddress, address _zroPaymentAddress, bytes _adapterParams) external payable",
   "function decimals() view returns (uint8)",
   "function name() view returns (string)",
-  "function symbol() view returns (string)",
+  "function symbol() view returns (string)"
 ] as const;
 
-/** ====== Chain preset (mainnets). Tambah sendiri bila perlu ====== */
+/** ===== Chain presets (mainnets) ===== */
 const CHAIN_CONFIG: Record<number, any> = {
-  1:    { chainId: "0x1",    chainName: "Ethereum",     rpcUrls: ["https://rpc.ankr.com/eth"],      nativeCurrency:{name:"ETH",symbol:"ETH",decimals:18} },
+  1:    { chainId: "0x1",    chainName: "Ethereum",     rpcUrls: ["https://rpc.ankr.com/eth"], nativeCurrency:{name:"ETH",symbol:"ETH",decimals:18} },
   56:   { chainId: "0x38",   chainName: "BSC",          rpcUrls: ["https://bsc-dataseed.binance.org/"], nativeCurrency:{name:"BNB",symbol:"BNB",decimals:18} },
-  137:  { chainId: "0x89",   chainName: "Polygon",      rpcUrls: ["https://polygon-rpc.com"],       nativeCurrency:{name:"MATIC",symbol:"MATIC",decimals:18} },
-  42161:{ chainId: "0xa4b1", chainName: "Arbitrum One", rpcUrls: ["https://arb1.arbitrum.io/rpc"],  nativeCurrency:{name:"ETH",symbol:"ETH",decimals:18} },
-  10:   { chainId: "0xa",    chainName: "Optimism",     rpcUrls: ["https://mainnet.optimism.io"],   nativeCurrency:{name:"ETH",symbol:"ETH",decimals:18} },
-  8453: { chainId: "0x2105", chainName: "Base",         rpcUrls: ["https://mainnet.base.org"],      nativeCurrency:{name:"ETH",symbol:"ETH",decimals:18} },
+  137:  { chainId: "0x89",   chainName: "Polygon",      rpcUrls: ["https://polygon-rpc.com"], nativeCurrency:{name:"MATIC",symbol:"MATIC",decimals:18} },
+  42161:{ chainId: "0xa4b1", chainName: "Arbitrum One", rpcUrls: ["https://arb1.arbitrum.io/rpc"], nativeCurrency:{name:"ETH",symbol:"ETH",decimals:18} },
+  10:   { chainId: "0xa",    chainName: "Optimism",     rpcUrls: ["https://mainnet.optimism.io"], nativeCurrency:{name:"ETH",symbol:"ETH",decimals:18} },
+  8453: { chainId: "0x2105", chainName: "Base",         rpcUrls: ["https://mainnet.base.org"], nativeCurrency:{name:"ETH",symbol:"ETH",decimals:18} },
 };
 
-/** ====== LZ EIDs populer + mapping chainId asal ====== */
+/** ===== LZ chains (label + EID + chainId asal) ===== */
 const LZ_OPTS = [
   { label: "Ethereum", eid: 101, chainId: 1 },
-  { label: "BSC", eid: 102, chainId: 56 },
-  { label: "Polygon", eid: 109, chainId: 137 },
+  { label: "BSC",      eid: 102, chainId: 56 },
+  { label: "Polygon",  eid: 109, chainId: 137 },
   { label: "Arbitrum", eid: 110, chainId: 42161 },
   { label: "Optimism", eid: 111, chainId: 10 },
-  { label: "Base", eid: 112, chainId: 8453 },
+  { label: "Base",     eid: 112, chainId: 8453 },
 ];
 
-/** helper: buat instance kontrak */
+/** Helpers */
 const getOFT = (addr: string, providerOrSigner: any) =>
   new ethers.Contract(addr, MINIMAL_OFT_ABI, providerOrSigner);
 
-/** helper: encode EVM address -> bytes (abi.encodePacked(address)) */
+/** encodePacked(address) → bytes */
 const toBytes = (addr: string) => ethers.solidityPacked(["address"], [addr]);
 
-export default function App() {
-  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
-  const [signer, setSigner] = useState<ethers.Signer | null>(null);
-  const [account, setAccount] = useState<string | null>(null);
-  const [chainId, setChainId] = useState<number | null>(null);
+/** adapterParams v1: abi.encode(uint16 version=1, uint256 gas)  */
+const buildAdapterParamsV1 = (gas: bigint) =>
+  ethers.AbiCoder.defaultAbiCoder().encode(["uint16","uint256"], [1, gas]);
 
-  const [srcChain, setSrcChain] = useState<number>(56);        // default source: BSC
-  const [dstEid, setDstEid] = useState<number>(101);           // default destination: Ethereum (EID 101)
+/** parse error agar lebih informatif */
+function errMsg(e: any) {
+  return e?.reason || e?.shortMessage || e?.message || "reverted";
+}
+
+export default function App() {
+  const [provider, setProvider]   = useState<ethers.BrowserProvider | null>(null);
+  const [signer, setSigner]       = useState<ethers.Signer | null>(null);
+  const [account, setAccount]     = useState<string | null>(null);
+  const [chainId, setChainId]     = useState<number | null>(null);
+
+  const [srcChain, setSrcChain]   = useState<number>(56); // default BSC
+  const [dstEid, setDstEid]       = useState<number>(101);
 
   const [contractAddr, setContractAddr] = useState("");
-  const [contract, setContract] = useState<any>(null);
+  const [contract, setContract]   = useState<any>(null);
+  const [token, setToken]         = useState({ name: "", symbol: "", decimals: 18 });
 
-  const [tokenMeta, setTokenMeta] = useState({ name: "", symbol: "", decimals: 18 });
   const [recipient, setRecipient] = useState("");
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount]       = useState("");
 
+  const [gasLimit, setGasLimit]   = useState<string>("200000"); // adapter v1 gas
   const [nativeFee, setNativeFee] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy]           = useState(false);
 
-  /** Connect wallet */
+  /** Connect */
   async function connectWallet() {
     try {
       if (!(window as any).ethereum) return alert("MetaMask tidak ditemukan.");
-      const p = new ethers.BrowserProvider((window as any).ethereum, "any");
-      const accounts = await p.send("eth_requestAccounts", []);
-      const s = await p.getSigner();
-      const n = await p.getNetwork();
-      setProvider(p);
-      setSigner(s);
-      setAccount(accounts[0]);
-      setChainId(Number(n.chainId));
-      setRecipient(accounts[0]); // auto isi recipient
-    } catch (e: any) {
-      console.error(e); alert(e.message || e);
-    }
+      const p  = new ethers.BrowserProvider((window as any).ethereum, "any");
+      const ac = await p.send("eth_requestAccounts", []);
+      const s  = await p.getSigner();
+      const n  = await p.getNetwork();
+      setProvider(p); setSigner(s);
+      setAccount(ac[0]); setChainId(Number(n.chainId));
+      setRecipient(ac[0]);
+    } catch (e) { alert(errMsg(e)); }
   }
 
-  /** Switch / add network ke source chain */
+  /** Switch/Add network ke source chain */
   async function ensureSourceNetwork(target: number) {
     if (!(window as any).ethereum) return;
     if (chainId === target) return;
@@ -84,97 +90,85 @@ export default function App() {
         params: [{ chainId: CHAIN_CONFIG[target].chainId }],
       });
       setChainId(target);
-    } catch (err: any) {
-      if (err.code === 4902) {
+    } catch (e: any) {
+      if (e.code === 4902) {
         await (window as any).ethereum.request({
           method: "wallet_addEthereumChain",
           params: [CHAIN_CONFIG[target]],
         });
         setChainId(target);
       } else {
-        throw err;
+        throw e;
       }
     }
   }
 
-  /** Load kontrak & token info */
+  /** Load kontrak & info token */
   async function loadContract() {
     try {
       if (!provider) return alert("Connect wallet dulu.");
       if (!ethers.isAddress(contractAddr)) return alert("Alamat kontrak tidak valid.");
       const c = getOFT(contractAddr, provider);
-      setContract(c);
       const [name, symbol, decimals] = await Promise.all([c.name(), c.symbol(), c.decimals()]);
-      setTokenMeta({ name, symbol, decimals: Number(decimals) });
-      alert(`Loaded: ${name} (${symbol}), decimals ${decimals}`);
-    } catch (e: any) {
-      console.error("loadContract", e);
-      alert("Gagal load kontrak (pastikan ini OFT/adapter).");
-    }
+      setContract(c);
+      setToken({ name, symbol, decimals: Number(decimals) });
+      alert(`Token: ${name} (${symbol}), decimals ${decimals}`);
+    } catch (e) { alert("Gagal load kontrak (pastikan ini OFT)."); }
   }
 
-  /** Estimate fee */
+  /** Estimate fee dengan adapter v1 */
   async function doEstimate() {
     try {
       if (!contract) return alert("Kontrak belum dimuat.");
-      if (!recipient || !ethers.isAddress(recipient)) return alert("Recipient tidak valid.");
+      if (!ethers.isAddress(recipient)) return alert("Recipient tidak valid.");
       if (!amount || Number(amount) <= 0) return alert("Amount > 0");
-      const amtWei = ethers.parseUnits(amount, tokenMeta.decimals);
+      const amt = ethers.parseUnits(amount, token.decimals);
       const toB = toBytes(recipient);
-      const res = await contract.estimateSendFee(Number(dstEid), toB, amtWei, false, "0x");
+      const adapter = buildAdapterParamsV1(BigInt(gasLimit));   // << penting
+      const res = await contract.estimateSendFee(Number(dstEid), toB, amt, false, adapter);
       setNativeFee(res?.[0]?.toString?.() || null);
-      console.log("estimateSendFee", res);
-    } catch (e: any) {
-      console.error("estimate", e);
-      alert("Estimate gagal (cek trustedRemote / EID / adapterParams).");
-    }
+    } catch (e) { alert("Estimate gagal: " + errMsg(e)); }
   }
 
-  /** Bridge */
+  /** Bridge (dengan preflight) */
   async function doBridge() {
     if (!signer || !contract) return;
     try {
-      // pastikan di source chain yang dipilih
-      await ensureSourceNetwork(srcChain);
+      await ensureSourceNetwork(srcChain); // pastikan sudah di source chain
 
-      const from = await signer.getAddress();
-      const decimals = tokenMeta.decimals;
-      const amtWei = ethers.parseUnits(amount, decimals);
-      const toB = toBytes(recipient);
+      const from  = await signer.getAddress();
+      const amt   = ethers.parseUnits(amount, token.decimals);
+      const toB   = toBytes(recipient);
+      const adapter = buildAdapterParamsV1(BigInt(gasLimit));
 
-      // fee
       let fee = nativeFee ? BigInt(nativeFee) : 0n;
       if (fee === 0n) {
-        const r = await contract.estimateSendFee(Number(dstEid), toB, amtWei, false, "0x");
+        const r = await contract.estimateSendFee(Number(dstEid), toB, amt, false, adapter);
         fee = BigInt(r?.[0] || 0n);
       }
 
-      // preflight supaya error-nya jelas
       const cWrite = contract.connect(signer);
+
+      // preflight: staticCall & estimateGas untuk menangkap revert sebelum kirim tx
       try {
-        const gas = await cWrite.estimateGas.sendFrom(
-          from, Number(dstEid), toB, amtWei, from, ethers.ZeroAddress, "0x", { value: fee }
-        );
-        console.log("preflight gas", gas.toString());
+        await cWrite.sendFrom.staticCall(from, Number(dstEid), toB, amt, from, ethers.ZeroAddress, adapter, { value: fee });
+        const gas = await cWrite.estimateGas.sendFrom(from, Number(dstEid), toB, amt, from, ethers.ZeroAddress, adapter, { value: fee });
+        console.log("preflight ok, gas:", gas.toString());
       } catch (pre: any) {
         console.error("preflight revert", pre);
         alert(
-          "Preflight revert.\nKemungkinan:\n• trustedRemote/peer untuk EID tujuan belum diset\n• adapterParams salah\n• fee native kurang\n• kontrak bukan OFT"
+          "Preflight revert.\nKemungkinan:\n• trustedRemote/peer ke EID tujuan belum diset\n• adapterParams (gas limit) terlalu kecil\n• fee native kurang\n• kontrak bukan OFT"
         );
         return;
       }
 
       setBusy(true);
-      const tx = await cWrite.sendFrom(
-        from, Number(dstEid), toB, amtWei, from, ethers.ZeroAddress, "0x", { value: fee }
-      );
+      const tx = await cWrite.sendFrom(from, Number(dstEid), toB, amt, from, ethers.ZeroAddress, adapter, { value: fee });
       alert("Tx sent: " + tx.hash);
-      const rc = await tx.wait();
-      console.log("confirmed", rc);
+      await tx.wait();
       alert("Tx confirmed!");
-    } catch (e: any) {
-      console.error("bridge", e);
-      alert("Bridge error: " + (e.reason || e.message || "reverted"));
+    } catch (e) {
+      alert("Bridge error: " + errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -201,9 +195,9 @@ export default function App() {
           <div className="rounded-xl border p-4 bg-slate-50">
             <div className="font-semibold">Token yang di-bridge</div>
             <div className="text-sm text-slate-700 mt-1">
-              <div>Nama: <b>{tokenMeta.name || "-"}</b></div>
-              <div>Simbol: <b>{tokenMeta.symbol || "-"}</b></div>
-              <div>Decimals: <b>{tokenMeta.decimals}</b></div>
+              <div>Nama: <b>{token.name || "-"}</b></div>
+              <div>Simbol: <b>{token.symbol || "-"}</b></div>
+              <div>Decimals: <b>{token.decimals}</b></div>
               <div>Kontrak: <span className="font-mono">{contractAddr}</span></div>
               <div>Source Chain: <b>{CHAIN_CONFIG[srcChain]?.chainName || srcChain}</b></div>
             </div>
@@ -214,33 +208,24 @@ export default function App() {
         <div className="grid md:grid-cols-2 gap-4">
           <div className="rounded-xl border p-4">
             <div className="text-sm font-semibold">Source Chain</div>
-            <select
-              className="w-full mt-2 border rounded-lg px-3 py-2"
+            <select className="w-full mt-2 border rounded-lg px-3 py-2"
               value={srcChain}
-              onChange={(e) => setSrcChain(Number(e.target.value))}
+              onChange={(e)=>setSrcChain(Number(e.target.value))}
             >
-              {LZ_OPTS.map((c) => (
-                <option key={c.chainId} value={c.chainId}>{c.label} (chainId {c.chainId})</option>
-              ))}
+              {LZ_OPTS.map(c => <option key={c.chainId} value={c.chainId}>{c.label} (chainId {c.chainId})</option>)}
             </select>
-            <button
-              onClick={() => ensureSourceNetwork(srcChain)}
-              className="mt-2 w-full py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900"
-            >
+            <button onClick={()=>ensureSourceNetwork(srcChain)} className="mt-2 w-full py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900">
               Switch ke Source
             </button>
           </div>
 
           <div className="rounded-xl border p-4">
             <div className="text-sm font-semibold">Destination (EID)</div>
-            <select
-              className="w-full mt-2 border rounded-lg px-3 py-2"
+            <select className="w-full mt-2 border rounded-lg px-3 py-2"
               value={dstEid}
-              onChange={(e) => setDstEid(Number(e.target.value))}
+              onChange={(e)=>setDstEid(Number(e.target.value))}
             >
-              {LZ_OPTS.map((c) => (
-                <option key={c.eid} value={c.eid}>{c.label} (EID {c.eid})</option>
-              ))}
+              {LZ_OPTS.map(c => <option key={c.eid} value={c.eid}>{c.label} (EID {c.eid})</option>)}
             </select>
           </div>
         </div>
@@ -248,40 +233,46 @@ export default function App() {
         {/* Contract */}
         <div className="rounded-xl border p-4">
           <div className="text-sm font-semibold">Alamat Kontrak (OFT/Adapter)</div>
-          <input
-            className="w-full mt-2 border rounded-lg px-3 py-2 font-mono"
+          <input className="w-full mt-2 border rounded-lg px-3 py-2 font-mono"
             placeholder="0x..."
             value={contractAddr}
-            onChange={(e) => setContractAddr(e.target.value)}
+            onChange={(e)=>setContractAddr(e.target.value)}
           />
-          <button
-            onClick={loadContract}
-            className="mt-2 w-full py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900"
-          >
+          <button onClick={loadContract} className="mt-2 w-full py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900">
             Load Contract & Token Info
           </button>
         </div>
 
-        {/* Recipient & Amount */}
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="rounded-xl border p-4">
+        {/* Recipient, Amount, Adapter Gas */}
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="rounded-xl border p-4 md:col-span-2">
             <div className="text-sm font-semibold">Recipient</div>
-            <input
-              className="w-full mt-2 border rounded-lg px-3 py-2 font-mono"
+            <input className="w-full mt-2 border rounded-lg px-3 py-2 font-mono"
               value={recipient}
-              onChange={(e) => setRecipient(e.target.value)}
+              onChange={(e)=>setRecipient(e.target.value)}
             />
             <div className="text-xs text-slate-500 mt-1">Otomatis terisi dengan wallet yang connect (bisa diedit).</div>
           </div>
           <div className="rounded-xl border p-4">
             <div className="text-sm font-semibold">Amount</div>
-            <input
-              className="w-full mt-2 border rounded-lg px-3 py-2"
+            <input className="w-full mt-2 border rounded-lg px-3 py-2"
               placeholder="1.0"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e)=>setAmount(e.target.value)}
             />
           </div>
+        </div>
+
+        <div className="rounded-xl border p-4">
+          <div className="text-sm font-semibold">Adapter Gas Limit (v1)</div>
+          <input className="w-full mt-2 border rounded-lg px-3 py-2"
+            type="number"
+            min="100000"
+            step="10000"
+            value={gasLimit}
+            onChange={(e)=>setGasLimit(e.target.value)}
+          />
+          <div className="text-xs text-slate-500 mt-1">Contoh 200000. Beberapa chain butuh gas lebih besar.</div>
         </div>
 
         {/* Actions */}
@@ -289,11 +280,7 @@ export default function App() {
           <button onClick={doEstimate} className="flex-1 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900">
             Estimate Fee
           </button>
-          <button
-            onClick={doBridge}
-            disabled={busy}
-            className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
+          <button onClick={doBridge} disabled={busy} className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
             {busy ? "Bridging..." : "Bridge"}
           </button>
         </div>
@@ -305,8 +292,8 @@ export default function App() {
         )}
 
         <p className="text-xs text-slate-500">
-          Catatan: Bridge butuh kontrak OFT yang sudah <i>trustedRemote/peer</i> untuk EID tujuan. Jika preflight revert,
-          cek konfigurasi peer & adapterParams, serta pastikan berada di source chain yang benar.
+          Catatan: kontrak OFT harus terkonfigurasi <i>trustedRemote/peer</i> untuk EID tujuan. Jika preflight tetap revert,
+          hampir pasti peer belum diset di salah satu chain.
         </p>
       </div>
     </div>
