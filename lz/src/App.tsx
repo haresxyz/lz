@@ -61,23 +61,35 @@ export default function App() {
   const [nativeFee, setNativeFee] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // ✅ Connect Wallet dengan popup MetaMask
   async function connectWallet() {
-    if (!(window as any).ethereum) {
-      alert("MetaMask tidak ditemukan.");
-      return;
-    }
-    const p = new ethers.BrowserProvider((window as any).ethereum, "any");
-    await p.send("eth_requestAccounts", []);
-    const s = await p.getSigner();
-    const addr = await s.getAddress();
-    setProvider(p);
-    setSigner(s);
-    setAccount(addr);
+    try {
+      if (!(window as any).ethereum) {
+        alert("MetaMask tidak ditemukan.");
+        return;
+      }
+      const p = new ethers.BrowserProvider((window as any).ethereum, "any");
 
-    // auto isi recipient dengan wallet yang connect
-    setRecipient(addr);
+      // Minta izin akun (pasti munculkan popup)
+      const accounts = await p.send("eth_requestAccounts", []);
+      const s = await p.getSigner();
+      const addr = accounts[0];
+
+      setProvider(p);
+      setSigner(s);
+      setAccount(addr);
+
+      // Auto isi recipient
+      setRecipient(addr);
+
+      console.log("Wallet connected:", addr);
+    } catch (err: any) {
+      console.error("Connect error:", err);
+      alert("Gagal connect wallet: " + (err.message || err));
+    }
   }
 
+  // Load kontrak
   async function loadContract() {
     if (!provider) return alert("Connect wallet dulu.");
     const c = getOFT(contractAddr, provider);
@@ -91,6 +103,7 @@ export default function App() {
     } catch {}
   }
 
+  // Estimate fee
   async function doEstimate() {
     if (!contract) return alert("Kontrak belum dimuat.");
     const amtWei = ethers.parseUnits(amount || "0", tokenMeta.decimals);
@@ -98,6 +111,7 @@ export default function App() {
     setNativeFee(res?.[0]?.toString?.() || null);
   }
 
+  // Bridge
   async function doBridge() {
     if (!signer || !contract) return;
     const cWrite = getOFT(contractAddr, signer);
@@ -177,9 +191,7 @@ export default function App() {
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
           />
-          <p className="text-xs text-gray-500">
-            otomatis terisi wallet yang connect
-          </p>
+          <p className="text-xs text-gray-500">Otomatis terisi wallet yang connect</p>
         </div>
 
         <div>
